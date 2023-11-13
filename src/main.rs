@@ -1,17 +1,27 @@
-use serde_json::Value;
-use tidal::{get_access_token, get_json_data, print_titles, save_json};
 use std::error::Error;
+use serde_json::{Value, json};
+use clap::Parser;
+use tidal::{get_id_and_secret, get_access_token, get_json_data, print_titles, save_json, Args};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mut input = String::new();
-    println!("Search: ");
-    std::io::stdin()
-        .read_line(&mut input)
-        .expect("Failed to read line");
+    let args = Args::parse();
 
-    let client_id = String::from("gcjYbogNbf4qm7LQ");
-    let client_secret = String::from("lHANoOjCStwsONMIeGyiT0aef0BmeEemfmIQq7BNqH8=");
+    if args.get_login_save() {
+        if args.get_id().is_some() && args.get_secret().is_some() {
+            let json: Value = json!({
+                "client_id": args.get_id().clone().unwrap(),
+                "client_secret": args.get_secret().clone().unwrap()
+            });
+            save_json(&json, "login")?;
+        } else {
+            return Err("Client ID and secret must be given to save login data".into());
+        }
+    }
+
+    let (client_id, client_secret) = get_id_and_secret(&args)?;
+
+    let input = args.get_search_args();
     let client = reqwest::Client::new();
 
     let access_token = get_access_token(&client, &client_id, &client_secret).await?;
@@ -20,7 +30,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     print_titles(&json)?;
 
-    save_json(&json)?;
+    if args.get_data_save() {
+        save_json(&json, "data")?;
+    }
 
 
     Ok(())
