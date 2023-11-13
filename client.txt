@@ -1,5 +1,0 @@
-B64CREDS=$(echo -n "bsHSfRko69cZCKTY:iqUfE4Q9ysSTdCup0etV5XBL3qiHgPvtgUDKV1kN4hE=" | base64)
-curl -X POST \
-  -H "Authorization: Basic $B64CREDS" \
-  -d "grant_type=client_credentials" \
-  https://auth.tidal.com/v1/oauth2/token
