@@ -14,6 +14,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 "client_secret": client_secret
             });
 
+            let client = reqwest::Client::new();
+            let _access_token = get_access_token(&client, &client_id, &client_secret).await?;
+
             save_json(&json, "config")?;
             println!("Client ID and secret have been saved in the config.json file");
 
@@ -24,7 +27,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let client_id = login_args["client_id"].clone();
             let client_secret = login_args["client_secret"].clone();
 
-            let input = args.get_search_args()?;
+            let input = args.get_search_args();
             let client = reqwest::Client::new();
             let access_token = get_access_token(&client, &client_id, &client_secret).await?;
 
@@ -32,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             check_for_error(&json)?;
 
-            print_content(&json, &args.get_target_type())?;
+            print_content(&json, args.get_target_type())?;
 
             if args.get_save_flag() {
                 save_json(&json, "data")?;

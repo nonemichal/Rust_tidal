@@ -1,12 +1,15 @@
 use std::error::Error;
 use std::fs::File;
 use std::collections::HashMap;
-use clap::{Parser, Args, Subcommand};
+use clap::{Parser, Args, Subcommand, ValueEnum};
 use base64::{Engine as _, engine::general_purpose};
 use urlencoding;
 use reqwest::Url;
 use reqwest::header::{HeaderValue, HeaderMap};
 use serde_json::Value;
+
+#[macro_use]
+extern crate lazy_static;
 
 /// Program working with Tidal API
 #[derive(Parser)]
@@ -31,8 +34,8 @@ pub struct SearchArgs {
     query: String,
 
     /// Target search type
-    #[arg(short, long, default_value = "")]
-    target_type: String,
+    #[arg(short, long, value_enum, default_value_t = TargetType::All)]
+    target_type: TargetType,
 
     /// Pagination offset
     #[arg(short, long, default_value = "0")]
@@ -47,14 +50,49 @@ pub struct SearchArgs {
     country_code: String,
 
     /// Specify which popularity type to apply for query result
-    #[arg(short, long, default_value = "WORLDWIDE")]
-    popularity: String,
+    #[arg(short, long, value_enum, default_value_t = Popularity::Worldwide)]
+    popularity: Popularity,
 
     /// Flag to save content in a json file
     #[arg(short, long)]
     save_file: bool,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Hash)]
+pub enum TargetType {
+    All,
+    Artists,
+    Albums,
+    Tracks,
+    Videos,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Hash)]
+pub enum Popularity {
+    Worldwide,
+    Country,
+}
+
+lazy_static! {
+    static ref TARGET_HASHMAP: HashMap<TargetType, &'static str> = {
+        let mut m = HashMap::new();
+        m.insert(TargetType::All, "");
+        m.insert(TargetType::Artists, "artists");
+        m.insert(TargetType::Albums, "albums");
+        m.insert(TargetType::Tracks, "tracks");
+        m.insert(TargetType::Videos, "videos");
+        m
+    };
+}
+
+lazy_static! {
+    static ref POPULARITY_HASHMAP: HashMap<Popularity, &'static str> = {
+        let mut m = HashMap::new();
+        m.insert(Popularity::Worldwide, "WORLDWIDE");
+        m.insert(Popularity::Country, "COUNTRY");
+        m
+    };
+}
 
 
 impl Cli {
@@ -62,6 +100,9 @@ impl Cli {
         &self.command
     }
 
+    /// Returns client ID and client Secret in HashMap
+    /// If command is "login" gets arguments from user input
+    /// If command is "search" gets arguments from json file and returns error when file does not exist
     pub fn get_login_args(&self) -> Result<HashMap<&str, String>, Box<dyn Error>> {
         let args = &self.command;
         let (id, secret): (String, String);
@@ -80,7 +121,7 @@ impl Cli {
                     id = object["client_id"].as_str().unwrap().to_string();
                     secret = object["client_secret"].as_str().unwrap().to_string()
                 } else {
-                    return Err("Client ID and secret must be given to connect to Tidal API".into());
+                    return Err("Use login command to provide client ID and client secret".into());
                 }
             }
         }
@@ -94,42 +135,43 @@ impl SearchArgs {
         self.save_file
     }
 
-    pub fn get_target_type(&self) -> String {
-        self.target_type.clone()
+    pub fn get_target_type(&self) -> &TargetType {
+        &self.target_type
     }
 
-    pub fn get_search_args(&self) -> Result<HashMap<&str, String>, Box<dyn Error>> {
-        if self.query.is_empty() {
-            return Err("Search query must not be empty".into());
-        }
-
+    /// Creates and returns HashMap of search arguments
+    pub fn get_search_args(&self) -> HashMap<&str, String> {
         let mut search_args = HashMap::from([
             ("query", urlencoding::encode(&self.query.clone()).into_owned()),
             ("offset", self.offset.clone()),
             ("limit", self.limit.clone()),
             ("countryCode", self.country_code.clone()),
-            ("popularity", self.popularity.clone()),
+            ("popularity", POPULARITY_HASHMAP.get(&self.popularity).unwrap().to_string()),
         ]);
 
-        if !self.target_type.is_empty() {
-            search_args.insert("type", self.target_type.clone().to_uppercase());
+        if self.get_target_type() != &TargetType::All {
+            search_args.insert("type", TARGET_HASHMAP.get(&self.get_target_type()).unwrap().to_string());
         }
 
-        Ok(search_args)
+        search_args
     }
 }
 
+/// Saves a json file with provided content and name
 pub fn save_json(json: &Value, name: &str) -> Result<(), Box<dyn Error>> {
     serde_json::to_writer(&File::create(format!("{}.json", name))?, &json)?;
 
     Ok(())
 }
 
+/// Encodes client ID and client secret  as base64 string
 fn encode_base64(client_id: &str, client_secret: &str) -> String {
     let string_to_encode = format!("{}:{}", client_id, client_secret);
     general_purpose::STANDARD.encode(string_to_encode)
 }
 
+/// Send posts request to get access token from Tidal API
+/// If client ID or client secret is wrong returns error
 pub async fn get_access_token(client: &reqwest::Client, client_id: &str, client_secret: &str) -> Result<String, Box<dyn Error>> {
     let encoded_string = encode_base64(client_id, client_secret);
 
@@ -145,11 +187,18 @@ pub async fn get_access_token(client: &reqwest::Client, client_id: &str, client_
         .await?;
 
     let data: Value = serde_json::from_str(&result)?;
+    let data_obj = data.as_object().unwrap();
+
+    if data_obj.contains_key("error") {
+        return Err(data_obj["error_description"].as_str().unwrap().into());
+    }
+
     let access_token = data["access_token"].as_str().unwrap().to_string();
 
     Ok(access_token)
 }
 
+/// Sends get request to get json data based on search arguments
 pub async fn get_json_data(client: &reqwest::Client, access_token: &str, input: &HashMap<&str, String>) -> Result<Value, Box<dyn Error>> {
     let bearer_token = format!("Bearer {}", &access_token);
 
@@ -168,29 +217,45 @@ pub async fn get_json_data(client: &reqwest::Client, access_token: &str, input: 
         .text()
         .await?;
 
-    //println!("{:?}\n\n", res);
-
     let json: Value = serde_json::from_str(&res)?;
 
     Ok(json)
 }
 
-pub fn print_content(json: &Value, target_type: &String) -> Result<(), Box<dyn Error>> {
+/// Checks if sent request results in error
+pub fn check_for_error(json: &Value) -> Result<(), Box<dyn Error>> {
+    if json.as_object().unwrap().contains_key("errors") {
+        let body = json.as_object().unwrap()["errors"].as_array().unwrap();
+        let mut errors = String::new();
+
+        for error in body {
+            errors.push_str(error.as_object().unwrap()["detail"].as_str().unwrap());
+        }
+
+        return Err(errors.into());
+    }
+
+    Ok(())
+}
+
+/// Prints content of json file received by get request
+/// Tidal API is in beta version, so some (or more) content may result in error 451
+pub fn print_content(json: &Value, target_type: &TargetType) -> Result<(), Box<dyn Error>> {
     let mut targets = vec![];
 
-    if target_type == "" {
-        targets.push("artists");
-        targets.push("albums");
-        targets.push("tracks");
-        targets.push("videos");
+    if target_type == &TargetType::All {
+        targets.push(TARGET_HASHMAP.get(&TargetType::Artists).unwrap().to_string());
+        targets.push(TARGET_HASHMAP.get(&TargetType::Albums).unwrap().to_string());
+        targets.push(TARGET_HASHMAP.get(&TargetType::Tracks).unwrap().to_string());
+        targets.push(TARGET_HASHMAP.get(&TargetType::Videos).unwrap().to_string());
     } else {
-        targets.push(&target_type);
+        targets.push(TARGET_HASHMAP.get(&target_type).unwrap().to_string());
     }
 
     for target in targets {
         println!("\n{}: \n", target.to_uppercase());
 
-        for data in json.as_object().unwrap()[target].as_array().unwrap() {
+        for data in json.as_object().unwrap()[&target].as_array().unwrap() {
             let status = data["status"].as_i64().unwrap();
 
             if status == 200 {
@@ -229,17 +294,6 @@ pub fn print_content(json: &Value, target_type: &String) -> Result<(), Box<dyn E
                 println!("\tError {}: {}\n", status, data["message"].as_str().unwrap());
             }
         }
-    }
-
-    Ok(())
-}
-
-pub fn check_for_error(json: &Value) -> Result<(), Box<dyn Error>> {
-    if json.as_object().unwrap().contains_key("errors") {
-        let body = json.as_object().unwrap()["errors"].as_array().unwrap()[0].as_object().unwrap();
-        let error = body["detail"].as_str().unwrap();
-
-        return Err(error.into());
     }
 
     Ok(())
