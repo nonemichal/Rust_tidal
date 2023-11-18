@@ -1,22 +1,30 @@
 use std::error::Error;
 use serde_json::{Value, json};
 use clap::Parser;
-use tidal::{get_id_and_secret, get_access_token, get_json_data, print_titles, save_json, Args};
+use tidal::{get_id_and_secret, get_access_token, get_json_data, print_titles, save_json, Args, Commands};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    if args.get_login_save() {
-        if args.get_id().is_some() && args.get_secret().is_some() {
-            let json: Value = json!({
-                "client_id": args.get_id().clone().unwrap(),
-                "client_secret": args.get_secret().clone().unwrap()
-            });
-            save_json(&json, "login")?;
-        } else {
-            return Err("Client ID and secret must be given to save login data".into());
+    match &args.get_command() {
+        Some(Commands::Login { id, secret }) => {
+            if id.is_some() && secret.is_some() {
+                let json: Value = json!({
+                    "client_id": id.clone().unwrap(),
+                    "client_secret": secret.clone().unwrap()
+                });
+                save_json(&json, "login")?;
+            } else {
+                return Err("Client ID and secret must be given to save login data".into());
+            }
+
+            return Ok(());
         }
+        Some(Commands::Search { val }) => {
+
+        }
+        None => println!("Wrong")
     }
 
     let (client_id, client_secret) = get_id_and_secret(&args)?;

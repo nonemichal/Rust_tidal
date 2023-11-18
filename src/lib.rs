@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fs::File;
 use std::collections::HashMap;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use base64::{Engine as _, engine::general_purpose};
 use urlencoding;
 use reqwest::Url;
@@ -9,9 +9,13 @@ use reqwest::header::{HeaderValue, HeaderMap};
 use serde_json::Value;
 
 /// Program working with Tidal API
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(author, version, about, long_about = None)]
+#[command(propagate_version = true)]
 pub struct Args {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     /// Flag specifying whether login data should be saved to json file
     #[clap(short, long)]
     login_save: bool,
@@ -29,7 +33,7 @@ pub struct Args {
     secret: Option<String>,
 
     /// Search query
-    #[clap(short, long)]
+    #[clap(short, long, default_value = "")]
     search: String,
 
     /// Target search type
@@ -54,6 +58,10 @@ pub struct Args {
 }
 
 impl Args {
+    pub fn get_command(&self) -> &Option<Commands> {
+        &self.command
+    }
+
     pub fn get_login_save(&self) -> bool {
         self.login_save
     }
@@ -85,6 +93,14 @@ impl Args {
 
         args
     }
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    /// Adds files to myapp
+    Search { val: Option<String> },
+    Login { id: Option<String>,
+            secret: Option<String>},
 }
 
 pub fn save_json(json: &Value, name: &str) -> Result<(), Box<dyn Error>> {
