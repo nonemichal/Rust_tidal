@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fs::File;
 use std::collections::HashMap;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Args, Subcommand};
 use base64::{Engine as _, engine::general_purpose};
 use urlencoding;
 use reqwest::Url;
@@ -11,76 +11,94 @@ use serde_json::Value;
 /// Program working with Tidal API
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
-#[command(propagate_version = true)]
-pub struct Args {
+pub struct Cli {
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
+}
 
-    /// Flag specifying whether login data should be saved to json file
-    #[clap(short, long)]
-    login_save: bool,
+#[derive(Subcommand)]
+pub enum Commands {
+    /// Login to Tidal API and save a config file
+    Login { client_id: String, client_secret: String },
 
-    /// Flag specifying whether searched data should be saved to json file
-    #[clap(short, long)]
-    data_save: bool,
+    /// Send a query to search for content
+    Search(SearchArgs),
+}
 
-    /// Client ID
-    #[clap(long)]
-    id: Option<String>,
-
-    /// Client secret
-    #[clap(long)]
-    secret: Option<String>,
-
+#[derive(Args)]
+pub struct SearchArgs {
     /// Search query
-    #[clap(short, long, default_value = "")]
-    search: String,
+    query: String,
 
     /// Target search type
-    #[clap(long, default_value = "")]
+    #[arg(short, long, default_value = "")]
     target_type: String,
 
     /// Pagination offset
-    #[clap(long, default_value = "0")]
+    #[arg(short, long, default_value = "0")]
     offset: String,
 
     /// Page size
-    #[clap(long, default_value = "10")]
+    #[arg(short, long, default_value = "10")]
     limit: String,
 
     /// ISO 3166-1 alpha-2 country code
-    #[clap(long, default_value = "PL")]
+    #[arg(short, long, default_value = "US")]
     country_code: String,
 
     /// Specify which popularity type to apply for query result
-    #[clap(long, default_value = "WORLDWIDE")]
+    #[arg(short, long, default_value = "WORLDWIDE")]
     popularity: String,
+
+    /// Flag to save content in a json file
+    #[arg(short, long)]
+    save_file: bool,
 }
 
-impl Args {
-    pub fn get_command(&self) -> &Option<Commands> {
+impl Cli {
+    pub fn get_command(&self) -> &Commands {
         &self.command
     }
 
-    pub fn get_login_save(&self) -> bool {
-        self.login_save
+    pub fn get_login_args(&self) -> Result<HashMap<&str, String>, Box<dyn Error>> {
+        let args = &self.command;
+        let (id, secret): (String, String);
+
+        match args {
+            Commands::Login { client_id, client_secret } => {
+                id = client_id.clone();
+                secret = client_secret.clone();
+            }
+            Commands::Search(_args) => {
+                if std::path::Path::new("login.json").exists() {
+                    let file = std::fs::File::open("config.json")?;
+                    let reader = std::io::BufReader::new(file);
+                    let json: Value = serde_json::from_reader(reader)?;
+                    let object = json.as_object().unwrap();
+                    id = object["client_id"].to_string();
+                    secret = object["client_secret"].to_string();
+                } else {
+                    return Err("Client ID and secret must be given to connect to Tidal API".into());
+                }
+            }
+        }
+
+        Ok(HashMap::from([("client_id", id), ("client_secret", secret)]))
+    }
+}
+
+impl SearchArgs {
+    pub fn get_save_flag(&self) -> bool {
+        self.save_file
     }
 
-    pub fn get_data_save(&self) -> bool {
-        self.data_save
-    }
+    pub fn get_search_args(&self) -> Result<HashMap<&str, String>, Box<dyn Error>> {
+        if self.query.is_empty() {
+            return Err("Search query must not be empty".into());
+        }
 
-    pub fn get_id(&self) -> Option<String> {
-        self.id.clone()
-    }
-
-    pub fn get_secret(&self) -> Option<String> {
-        self.secret.clone()
-    }
-
-    pub fn get_search_args(&self) -> HashMap<&str, String> {
-        let mut args = HashMap::from([
-            ("query", urlencoding::encode(self.search.clone().trim()).into_owned()),
+        let mut search_args = HashMap::from([
+            ("query", urlencoding::encode(&self.query.clone()).into_owned()),
             ("offset", self.offset.clone()),
             ("limit", self.limit.clone()),
             ("countryCode", self.country_code.clone()),
@@ -88,48 +106,17 @@ impl Args {
         ]);
 
         if !self.target_type.is_empty() {
-            args.insert("type", self.target_type.clone());
+            search_args.insert("type", self.target_type.clone());
         }
 
-        args
+        Ok(search_args)
     }
-}
-
-#[derive(Subcommand)]
-pub enum Commands {
-    /// Adds files to myapp
-    Search { val: Option<String> },
-    Login { id: Option<String>,
-            secret: Option<String>},
 }
 
 pub fn save_json(json: &Value, name: &str) -> Result<(), Box<dyn Error>> {
     serde_json::to_writer(&File::create(format!("{}.json", name))?, &json)?;
 
     Ok(())
-}
-
-pub fn get_id_and_secret(args: &Args) -> Result<(String, String), Box<dyn Error>> {
-    let (client_id, client_secret): (String, String);
-
-    if args.id.is_none() || args.secret.is_none() {
-        if std::path::Path::new("login.json").exists() {
-            let file = std::fs::File::open("login.json")?;
-            let reader = std::io::BufReader::new(file);
-            let json: Value = serde_json::from_reader(reader)?;
-            let object = json.as_object().unwrap();
-
-            client_id = object["client_id"].as_str().unwrap().to_string();
-            client_secret = object["client_secret"].as_str().unwrap().to_string();
-        } else {
-            return Err("Client ID and secret must be given to connect to Tidal API".into());
-        }
-    } else {
-        client_id = args.id.clone().unwrap().to_string();
-        client_secret = args.secret.clone().unwrap().to_string();
-    }
-
-    Ok((client_id, client_secret))
 }
 
 fn encode_base64(client_id: &str, client_secret: &str) -> String {
@@ -203,7 +190,7 @@ pub fn print_titles(json: &Value) -> Result<(), Box<dyn Error>> {
 
             let album_name = resource["title"].as_str().unwrap();
             let release_date = resource["releaseDate"].as_str().unwrap();
-            let content = format!("{} - {}\t{}", artists_name, album_name, release_date);
+            let content = format!("{} - {} {}", artists_name, album_name, release_date);
 
             println!("{}\n", content);
         } else {

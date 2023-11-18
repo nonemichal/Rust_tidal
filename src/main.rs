@@ -1,47 +1,42 @@
 use std::error::Error;
 use serde_json::{Value, json};
 use clap::Parser;
-use tidal::{get_id_and_secret, get_access_token, get_json_data, print_titles, save_json, Args, Commands};
+use tidal::{get_access_token, get_json_data, print_titles, save_json, Cli, Commands};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let args = Args::parse();
+    let cli = Cli::parse();
 
-    match &args.get_command() {
-        Some(Commands::Login { id, secret }) => {
-            if id.is_some() && secret.is_some() {
-                let json: Value = json!({
-                    "client_id": id.clone().unwrap(),
-                    "client_secret": secret.clone().unwrap()
-                });
-                save_json(&json, "login")?;
-            } else {
-                return Err("Client ID and secret must be given to save login data".into());
-            }
+    match cli.get_command() {
+        Commands::Login { client_id, client_secret } => {
+            let json: Value = json!({
+                "client_id": client_id,
+                "client_secret": client_secret
+            });
+
+            save_json(&json, "config")?;
+            println!("Client ID and secret have been saved in the config.json file");
 
             return Ok(());
         }
-        Some(Commands::Search { val }) => {
+        Commands::Search(args) => {
+            let login_args = cli.get_login_args()?;
+            let client_id = login_args["client_id"].clone();
+            let client_secret = login_args["client_secret"].clone();
 
+            let input = args.get_search_args()?;
+            let client = reqwest::Client::new();
+            let access_token = get_access_token(&client, &client_id, &client_secret).await?;
+
+            let json: Value = get_json_data(&client, &access_token, &input).await?;
+
+            print_titles(&json)?;
+
+            if args.get_save_flag() {
+                save_json(&json, "data")?;
+            }
         }
-        None => println!("Wrong")
     }
-
-    let (client_id, client_secret) = get_id_and_secret(&args)?;
-
-    let input = args.get_search_args();
-    let client = reqwest::Client::new();
-
-    let access_token = get_access_token(&client, &client_id, &client_secret).await?;
-
-    let json: Value = get_json_data(&client, &access_token, &input).await?;
-
-    print_titles(&json)?;
-
-    if args.get_data_save() {
-        save_json(&json, "data")?;
-    }
-
 
     Ok(())
 }
