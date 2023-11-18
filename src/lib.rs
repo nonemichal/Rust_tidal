@@ -77,10 +77,10 @@ lazy_static! {
     static ref TARGET_HASHMAP: HashMap<TargetType, &'static str> = {
         let mut m = HashMap::new();
         m.insert(TargetType::All, "");
-        m.insert(TargetType::Artists, "artists");
-        m.insert(TargetType::Albums, "albums");
-        m.insert(TargetType::Tracks, "tracks");
-        m.insert(TargetType::Videos, "videos");
+        m.insert(TargetType::Artists, "ARTISTS");
+        m.insert(TargetType::Albums, "ALBUMS");
+        m.insert(TargetType::Tracks, "TRACKS");
+        m.insert(TargetType::Videos, "VIDEOS");
         m
     };
 }
@@ -244,12 +244,12 @@ pub fn print_content(json: &Value, target_type: &TargetType) -> Result<(), Box<d
     let mut targets = vec![];
 
     if target_type == &TargetType::All {
-        targets.push(TARGET_HASHMAP.get(&TargetType::Artists).unwrap().to_string());
-        targets.push(TARGET_HASHMAP.get(&TargetType::Albums).unwrap().to_string());
-        targets.push(TARGET_HASHMAP.get(&TargetType::Tracks).unwrap().to_string());
-        targets.push(TARGET_HASHMAP.get(&TargetType::Videos).unwrap().to_string());
+        targets.push(TARGET_HASHMAP.get(&TargetType::Artists).unwrap().to_string().to_lowercase());
+        targets.push(TARGET_HASHMAP.get(&TargetType::Albums).unwrap().to_string().to_lowercase());
+        targets.push(TARGET_HASHMAP.get(&TargetType::Tracks).unwrap().to_string().to_lowercase());
+        targets.push(TARGET_HASHMAP.get(&TargetType::Videos).unwrap().to_string().to_lowercase());
     } else {
-        targets.push(TARGET_HASHMAP.get(&target_type).unwrap().to_string());
+        targets.push(TARGET_HASHMAP.get(&target_type).unwrap().to_string().to_lowercase());
     }
 
     for target in targets {
