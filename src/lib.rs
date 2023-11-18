@@ -55,6 +55,8 @@ pub struct SearchArgs {
     save_file: bool,
 }
 
+
+
 impl Cli {
     pub fn get_command(&self) -> &Commands {
         &self.command
@@ -70,13 +72,13 @@ impl Cli {
                 secret = client_secret.clone();
             }
             Commands::Search(_args) => {
-                if std::path::Path::new("login.json").exists() {
+                if std::path::Path::new("config.json").exists() {
                     let file = std::fs::File::open("config.json")?;
                     let reader = std::io::BufReader::new(file);
                     let json: Value = serde_json::from_reader(reader)?;
                     let object = json.as_object().unwrap();
-                    id = object["client_id"].to_string();
-                    secret = object["client_secret"].to_string();
+                    id = object["client_id"].as_str().unwrap().to_string();
+                    secret = object["client_secret"].as_str().unwrap().to_string()
                 } else {
                     return Err("Client ID and secret must be given to connect to Tidal API".into());
                 }
@@ -90,6 +92,10 @@ impl Cli {
 impl SearchArgs {
     pub fn get_save_flag(&self) -> bool {
         self.save_file
+    }
+
+    pub fn get_target_type(&self) -> String {
+        self.target_type.clone()
     }
 
     pub fn get_search_args(&self) -> Result<HashMap<&str, String>, Box<dyn Error>> {
@@ -106,7 +112,7 @@ impl SearchArgs {
         ]);
 
         if !self.target_type.is_empty() {
-            search_args.insert("type", self.target_type.clone());
+            search_args.insert("type", self.target_type.clone().to_uppercase());
         }
 
         Ok(search_args)
@@ -162,40 +168,78 @@ pub async fn get_json_data(client: &reqwest::Client, access_token: &str, input: 
         .text()
         .await?;
 
+    //println!("{:?}\n\n", res);
+
     let json: Value = serde_json::from_str(&res)?;
 
     Ok(json)
 }
 
-pub fn print_titles(json: &Value) -> Result<(), Box<dyn Error>> {
-    for album in json.as_object().unwrap()["albums"].as_array().unwrap() {
-        let status = album["status"].as_i64().unwrap();
+pub fn print_content(json: &Value, target_type: &String) -> Result<(), Box<dyn Error>> {
+    let mut targets = vec![];
 
-        if status == 200 {
-            let resource = album.as_object().unwrap()["resource"].as_object().unwrap();
-            let artists = resource["artists"].as_array().unwrap();
-            let artists_len = artists.len();
-            let mut artists_name = String::new();
-            let mut counter = 0;
+    if target_type == "" {
+        targets.push("artists");
+        targets.push("albums");
+        targets.push("tracks");
+        targets.push("videos");
+    } else {
+        targets.push(&target_type);
+    }
 
-            for artist in artists {
-                if counter != 0 && counter != artists_len {
-                    artists_name.push_str(", ");
+    for target in targets {
+        println!("\n{}: \n", target.to_uppercase());
+
+        for data in json.as_object().unwrap()[target].as_array().unwrap() {
+            let status = data["status"].as_i64().unwrap();
+
+            if status == 200 {
+                let resource = data.as_object().unwrap()["resource"].as_object().unwrap();
+                let content: String;
+
+                if target == "artists" {
+                    let name = resource["name"].as_str().unwrap();
+                    content = format!("\t{}", name);
+                } else {
+                    let artists = resource["artists"].as_array().unwrap();
+                    let title = resource["title"].as_str().unwrap();
+                    let artists_len = artists.len();
+                    let mut artists_name = String::new();
+                    let mut counter = 0;
+
+                    for artist in artists {
+                        if counter != 0 && counter != artists_len {
+                            artists_name.push_str(", ");
+                        }
+
+                        artists_name.push_str(artist["name"].as_str().unwrap());
+
+                        counter += 1;
+                    }
+                    if target != "tracks" {
+                        let release_date = resource["releaseDate"].as_str().unwrap();
+                        content = format!("{} - {} {}", artists_name, title, release_date);
+                    } else {
+                        content = format!("{} - {}", artists_name, title);
+                    }
                 }
 
-                artists_name.push_str(artist["name"].as_str().unwrap());
-
-                counter += 1;
+                println!("\t{}\n", content);
+            } else {
+                println!("\tError {}: {}\n", status, data["message"].as_str().unwrap());
             }
-
-            let album_name = resource["title"].as_str().unwrap();
-            let release_date = resource["releaseDate"].as_str().unwrap();
-            let content = format!("{} - {} {}", artists_name, album_name, release_date);
-
-            println!("{}\n", content);
-        } else {
-            println!("Error {}: {}\n", status, album["message"].as_str().unwrap());
         }
+    }
+
+    Ok(())
+}
+
+pub fn check_for_error(json: &Value) -> Result<(), Box<dyn Error>> {
+    if json.as_object().unwrap().contains_key("errors") {
+        let body = json.as_object().unwrap()["errors"].as_array().unwrap()[0].as_object().unwrap();
+        let error = body["detail"].as_str().unwrap();
+
+        return Err(error.into());
     }
 
     Ok(())

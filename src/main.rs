@@ -1,7 +1,7 @@
 use std::error::Error;
 use serde_json::{Value, json};
 use clap::Parser;
-use tidal::{get_access_token, get_json_data, print_titles, save_json, Cli, Commands};
+use tidal::{get_access_token, get_json_data, print_content, save_json, check_for_error, Cli, Commands};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -30,7 +30,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let json: Value = get_json_data(&client, &access_token, &input).await?;
 
-            print_titles(&json)?;
+            check_for_error(&json)?;
+
+            print_content(&json, &args.get_target_type())?;
 
             if args.get_save_flag() {
                 save_json(&json, "data")?;
