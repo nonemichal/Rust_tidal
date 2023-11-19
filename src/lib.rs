@@ -104,10 +104,10 @@ impl Cli {
     /// If command is "login" gets arguments from user input
     /// If command is "search" gets arguments from json file and returns error when file does not exist
     pub fn get_login_args(&self) -> Result<HashMap<&str, String>, Box<dyn Error>> {
-        let args = &self.command;
+        let command = &self.command;
         let (id, secret): (String, String);
 
-        match args {
+        match command {
             Commands::Login { client_id, client_secret } => {
                 id = client_id.clone();
                 secret = client_secret.clone();
